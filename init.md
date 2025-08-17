@@ -233,6 +233,48 @@ ssh-copy-id deploy@your-server-ip
 # Set: PasswordAuthentication no
 ```
 
+### GitHub SSH Key Setup
+```bash
+# Generate SSH key for GitHub
+ssh-keygen -t ed25519 -C "github-vps-key" -f ~/.ssh/github_ed25519 -N ""
+
+# Display public key to add to GitHub
+cat ~/.ssh/github_ed25519.pub
+
+# Create SSH config for GitHub
+cat << 'EOF' > ~/.ssh/config
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/github_ed25519
+    IdentitiesOnly yes
+EOF
+
+# Set proper permissions
+chmod 600 ~/.ssh/config
+
+# Add GitHub to known hosts
+ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+
+# Configure git identity
+git config --global user.name "your-username"
+git config --global user.email "your-email@example.com"
+```
+
+**To add SSH key to GitHub:**
+1. Go to https://github.com/settings/keys
+2. Click "New SSH key"
+3. Title: "VPS Server" (or preferred name)
+4. Key type: Authentication Key
+5. Paste the public key from `cat ~/.ssh/github_ed25519.pub`
+6. Click "Add SSH key"
+
+**Test connection:**
+```bash
+ssh -T git@github.com
+# Should see: "Hi username! You've successfully authenticated..."
+```
+
 ### Important Notes
 - **SSH Access**: Root login is disabled. Use the 'deploy' user for SSH access
 - **Firewall**: Only ports 22 (SSH), 80 (HTTP), and 443 (HTTPS) are open
