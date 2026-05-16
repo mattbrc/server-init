@@ -1,23 +1,38 @@
 # Hermes — Ops Notes
 
-Quick reference for operating the Hermes Agent gateway on this VPS (`first-server`). The setup playbook is in [`hermes.md`](./hermes.md); this file is the day-to-day cheat sheet.
+Day-to-day reference for operating a Hermes Agent gateway on a VPS once installed.
 
-## What we built
+> **This is an operational reference, not a fresh-install guide.** For installing Hermes Agent from scratch (creating the `hermes` user, installing the package, wiring up Discord/Telegram, etc.), follow the [upstream Hermes Agent docs](https://github.com/anthropics/hermes-agent) and the systemd unit examples there. The sections below assume Hermes is already running on the box.
+>
+> Matt-specific values (bot names, workspace paths, GitHub identities) appear throughout — they're examples of what you'll set up, not values you should copy verbatim.
 
-- Hermes Agent v0.13.0 running as a dedicated `hermes` user (uid 1001)
+## What this setup looks like
+
+- Hermes Agent v0.13.0 running as a dedicated `hermes` user (uid 1001) — separate user is the isolation boundary from the rest of the system
 - Provider: OpenRouter (Claude Sonnet 4.6 main, Gemini 2.5 Flash auxiliary)
-- Terminal backend: `local` (runs as hermes user; Docker isolation rejected as theater for engineering work — hermes user separation is the real boundary)
+- Terminal backend: `local` (commands run as the `hermes` user). Docker backend is also supported if you want container-level isolation on top of the user separation — pick based on your threat model.
 - Messaging: Discord DMs + Telegram, supervised by `hermes-gateway.service`
 - Web search: Tavily (primary), DuckDuckGo skill as fallback
-- GitHub bot: `emrg-hermes-bot` (id 285031989) — SSH key on bot account, fine-grained PAT in hermes's `.env` as `GITHUB_TOKEN`
-- Engineering workspaces:
-  - Yours: `/home/deploy/projects/emrg-master/{rxr,emrg-backend,emrg-cdk-infra,emrg-docs}` (HTTPS via gh)
-  - Hermes's: `/home/hermes/workspace/emrg-master/{rxr,emrg-backend,emrg-cdk-infra,emrg-docs}` (SSH)
-- Custom skill: `~/.hermes/skills/engineering/emrg-engineering/SKILL.md` — plan-first protocol, danger words, PR template, model escalation triggers
+- GitHub bot: a dedicated bot account (e.g. `emrg-hermes-bot`) — SSH key on the bot account, fine-grained PAT in hermes's `.env` as `GITHUB_TOKEN`. You'll create your own bot account and PAT.
+- Engineering workspaces (example layout — yours will differ):
+  - Human side: `/home/deploy/projects/<your-project>/` (HTTPS via `gh`)
+  - Hermes side: `/home/hermes/workspace/<your-project>/` (SSH, using the bot's key)
+- Custom skills go under `~/.hermes/skills/<category>/<name>/SKILL.md`
 - Weekly auto-update: Sundays at 06:00 local via `hermes-update.timer`
 - Manual update from Discord: DM `/update` to the bot
 - Log rotation: `/etc/logrotate.d/hermes-gateway` (daily, keep 14) and `/etc/logrotate.d/hermes-update` (monthly, keep 6)
-- Fully isolated from the `deploy` user's EMRG bot — no shared credentials or filesystem access
+
+## Required secrets (`.env`)
+
+Before Hermes will start, `/home/hermes/.hermes/.env` needs these (get each from the respective dashboard):
+
+| Variable | Where to get it |
+|---|---|
+| `OPENROUTER_API_KEY` | https://openrouter.ai → Keys |
+| `TAVILY_API_KEY` | https://tavily.com → API Keys |
+| `DISCORD_BOT_TOKEN` | https://discord.com/developers → your app → Bot → Reset Token. Enable **Message Content Intent**. |
+| `TELEGRAM_BOT_TOKEN` | DM `@BotFather` on Telegram → `/newbot` |
+| `GITHUB_TOKEN` | https://github.com/settings/tokens → fine-grained PAT scoped to the repos Hermes should touch |
 
 ## Service control
 
@@ -80,14 +95,14 @@ sudo ss -tnp 2>/dev/null | grep hermes      # active TCP (Discord = Cloudflare I
 | Gateway log | `/var/log/hermes-gateway.log` |
 | Update log | `/var/log/hermes-update.log` |
 | Hermes config (YAML) | `/home/hermes/.hermes/config.yaml` |
-| Hermes secrets (.env) | `/home/hermes/.hermes/.env` (chmod 600) — `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `GITHUB_TOKEN`, `DISCORD_BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`, etc. |
+| Hermes secrets (.env) | `/home/hermes/.hermes/.env` (chmod 600) — see "Required secrets" above |
 | Hermes source/venv | `/home/hermes/.hermes/hermes-agent/` |
-| Persona | `/home/hermes/.hermes/SOUL.md` |
-| Skills | `/home/hermes/.hermes/skills/` (91 total: 87 bundled + DDG fallback + emrg-engineering) |
-| Custom skill (engineering) | `/home/hermes/.hermes/skills/engineering/emrg-engineering/SKILL.md` |
-| EMRG workspace (Hermes) | `/home/hermes/workspace/emrg-master/{rxr,emrg-backend,emrg-cdk-infra,emrg-docs}` |
-| EMRG workspace (yours) | `/home/deploy/projects/emrg-master/{rxr,emrg-backend,emrg-cdk-infra,emrg-docs}` |
-| Hermes git identity | `emrg-hermes-bot <285031989+emrg-hermes-bot@users.noreply.github.com>` |
+| Persona | `/home/hermes/.hermes/SOUL.md` (optional — defines the agent's voice/style) |
+| Skills | `/home/hermes/.hermes/skills/` (bundled skills + any you add) |
+| Custom skills | `/home/hermes/.hermes/skills/<category>/<name>/SKILL.md` |
+| Project workspace (hermes side) | `/home/hermes/workspace/<your-project>/` |
+| Project workspace (your side) | `/home/<you>/projects/<your-project>/` |
+| Hermes git identity | Bot's noreply email, e.g. `<id>+<botname>@users.noreply.github.com` |
 | Hermes SSH key (private) | `/home/hermes/.ssh/id_ed25519` |
 | Sessions | `/home/hermes/.hermes/sessions/` |
 | Cron jobs | `/home/hermes/.hermes/cron/` |
@@ -149,11 +164,11 @@ To trigger an update from Discord any time: DM `/update` to the bot. That runs `
 
 ## Outstanding items / known caveats
 
-- **Docker output mount not configured.** Media file delivery (images/audio Hermes generates) may not surface back through Discord. Address by adding a mount to `terminal.docker_run_args` if you start using image/audio generation.
+- **Docker output mount may need configuring.** If you switch to the Docker terminal backend and use media generation (images/audio), the output won't surface back through Discord without a mount in `terminal.docker_run_args`.
 
 ## Rollback (full nuke)
 
-If you ever want to remove Hermes completely:
+> ⚠ **This is destructive and irreversible.** `userdel -r hermes` wipes `/home/hermes` entirely — including sessions, memories, custom skills, the bot's SSH private key, and your `.env` secrets. If you might want any of it back, copy `/home/hermes/.hermes/` somewhere safe **before** running this.
 
 ```bash
 sudo systemctl disable --now hermes-gateway hermes-update.timer
@@ -166,4 +181,4 @@ sudo userdel -r hermes        # removes /home/hermes too
 sudo rm /var/log/hermes-gateway.log /var/log/hermes-gateway.log.* /var/log/hermes-update.log /var/log/hermes-update.log.*
 ```
 
-EMRG bot is untouched by any of the above — it runs as `deploy` under PM2, completely separate.
+Anything running under a different user (e.g. other bots under `deploy`) is untouched — the user boundary is the isolation.

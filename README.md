@@ -12,8 +12,10 @@ This repository documents the complete setup process for securing and configurin
 
 ## Contents
 
-- `init.md` - Comprehensive server setup documentation with step-by-step instructions
+- `init.md` - Comprehensive VPS setup and hardening guide with step-by-step instructions
+- `HERMES.md` - Operational reference for running a Hermes Agent gateway on the box (assumes Hermes is already installed; points to upstream for fresh install)
 
 ## Usage
 
-Follow the instructions in `init.md` to secure and configure a fresh VPS installation with defense-in-depth security measures.
+1. Start with `init.md` on a fresh Ubuntu VPS — it walks through base install, user creation, SSH hardening, firewall, and other defense-in-depth measures.
+2. If you also want to run a Hermes Agent on the box, follow the upstream Hermes Agent install instructions and use `HERMES.md` as your day-to-day ops cheat sheet.

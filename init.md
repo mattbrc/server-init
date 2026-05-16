@@ -4,6 +4,18 @@
 
 This Hetzner VPS Ubuntu server has been secured with multiple layers of defense-in-depth security measures and essential development tools.
 
+## Prerequisites
+
+Before starting:
+
+- A fresh Ubuntu 22.04+ VPS (this was written for Hetzner Cloud, but should work on any Ubuntu VPS).
+- The provider's web console is accessible (e.g., Hetzner Cloud Console). **Keep this tab open the whole time** — it's your only recovery path if SSH gets misconfigured.
+- You are logged in as `root` over SSH (the default on a fresh Hetzner VPS).
+- You know the public IPv4 address of the server.
+- Optional but recommended: an SSH key pair already on your local machine. If not, run `ssh-keygen -t ed25519` locally first.
+
+**Safety tip:** Take a snapshot of the VPS in the Hetzner console before starting, so you can roll back if anything goes wrong.
+
 ### Security Implementations
 - **Firewall (UFW)**: Configured with strict rules allowing only SSH (22), HTTP (80), and HTTPS (443)
 - **Fail2ban**: Intrusion prevention system monitoring and blocking suspicious login attempts
@@ -27,7 +39,7 @@ This Hetzner VPS Ubuntu server has been secured with multiple layers of defense-
 
 ## Detailed Setup Steps
 
-### Phase 1: Initial Server Setup (User Completed)
+### Phase 1: Base install
 
 #### Step 1: System Update and Essential Packages
 ```bash
@@ -95,35 +107,98 @@ apt install -y curl wget git nano htop
 
 ---
 
-### Phase 2: Enhanced Security Measures (Claude Completed)
+### Phase 2: Hardening
 
 #### 1. Create Non-Root User with Sudo Privileges
 ```bash
-# Created new user 'deploy'
+# Create new user 'deploy' (pick any username you like — but use it consistently below)
 sudo useradd -m -s /bin/bash deploy
-echo "deploy:<random-password>" | sudo chpasswd
 
-# Added to sudo group
+# Generate a strong random password and set it on the new user.
+# IMPORTANT: copy the printed password somewhere safe — you may need it for sudo later.
+DEPLOY_PW=$(openssl rand -base64 24)
+echo "deploy:$DEPLOY_PW" | sudo chpasswd
+echo "deploy password (save this!): $DEPLOY_PW"
+
+# Add to sudo group
 sudo usermod -aG sudo deploy
 ```
-**Purpose**: Reduces risk by avoiding direct root access for daily operations
+**Purpose**: Reduces risk by avoiding direct root access for daily operations.
+
+> ⚠ **Do the SSH key + login test below BEFORE Step 2.** Step 2 disables root SSH login. If you can't log in as `deploy` first, you'll be locked out of SSH entirely and will need the provider's web console to recover.
+
+##### 1a. Set up SSH key login for `deploy` (do this before SSH hardening)
+
+On your **local machine** (not the server):
+
+```bash
+# Skip ssh-keygen if you already have a key at ~/.ssh/id_ed25519
+ssh-keygen -t ed25519 -C "your-email@example.com"
+
+# Copy your public key to the server's deploy user
+ssh-copy-id deploy@<server-ip>
+```
+
+Then **open a second terminal** and confirm you can log in:
+
+```bash
+ssh deploy@<server-ip>
+sudo -v   # confirm sudo works using the password from Step 1
+```
+
+Only continue to Step 2 once both succeed. Leave this second terminal open until the very end as your safety net.
 
 #### 2. SSH Hardening
-Created `/etc/ssh/sshd_config.d/99-hardening.conf`:
-```
+
+> ⚠ **Replace `deploy` in `AllowUsers` below with whatever username you picked in Step 1.** A typo here will lock everyone out.
+
+Write `/etc/ssh/sshd_config.d/99-hardening.conf`:
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/99-hardening.conf > /dev/null <<'EOF'
 PermitRootLogin no              # Disable root SSH login
-PasswordAuthentication yes      # Allow password auth (consider disabling after setting up keys)
-PermitEmptyPasswords no        # No empty passwords
+PasswordAuthentication yes      # Allow password auth (flip to "no" once you're sure key login works)
+PermitEmptyPasswords no         # No empty passwords
 PubkeyAuthentication yes        # Enable public key authentication
 MaxAuthTries 3                  # Limit authentication attempts
 MaxSessions 10                  # Limit concurrent sessions
 ClientAliveInterval 300         # Disconnect idle clients after 5 minutes
 ClientAliveCountMax 2           # Max keep-alive messages
-X11Forwarding no               # Disable X11 forwarding
-AllowUsers deploy              # Only allow specific user
-Protocol 2                     # Use SSH protocol 2 only
+X11Forwarding no                # Disable X11 forwarding
+AllowUsers deploy               # Only allow specific user — CHANGE if your user isn't named "deploy"
+Protocol 2                      # Use SSH protocol 2 only
+EOF
 ```
-**Purpose**: Prevents brute force attacks and unauthorized access
+
+**Validate the config before restarting** — a bad config will brick SSH on next restart:
+
+```bash
+sudo sshd -t   # silent = good. Any error means: do not restart yet, fix the file first.
+```
+
+Apply it:
+
+```bash
+sudo systemctl restart ssh
+```
+
+**Verify from your second terminal (the one already logged in as `deploy`):**
+
+```bash
+# Open a THIRD terminal and try a fresh SSH login as deploy:
+ssh deploy@<server-ip>
+```
+
+If the new login works, you're safe. If not, go back to your already-logged-in terminal and revert with:
+
+```bash
+sudo rm /etc/ssh/sshd_config.d/99-hardening.conf
+sudo systemctl restart ssh
+```
+
+**Purpose**: Prevents brute-force attacks and unauthorized access.
+
+Once you're confident key login works, tighten further by setting `PasswordAuthentication no` in the file above and restarting SSH.
 
 #### 3. Kernel Security Parameters
 Created `/etc/sysctl.d/99-security.conf`:
@@ -152,10 +227,13 @@ net.ipv4.tcp_syn_retries = 2
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_max_syn_backlog = 4096
 
-# Disable IPv6 (if not needed)
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
+# Disable IPv6 (OPTIONAL — only if you're not using IPv6).
+# Modern guidance is to configure IPv6 properly rather than disable it; some
+# services (e.g. GitHub) increasingly prefer IPv6. Leave these commented unless
+# you have a specific reason to disable.
+# net.ipv6.conf.all.disable_ipv6 = 1
+# net.ipv6.conf.default.disable_ipv6 = 1
+# net.ipv6.conf.lo.disable_ipv6 = 1
 
 # Restrict core dumps
 fs.suid_dumpable = 0
@@ -166,27 +244,35 @@ kernel.kptr_restrict = 2
 # Enable ASLR (Address Space Layout Randomization)
 kernel.randomize_va_space = 2
 ```
-**Purpose**: Hardens the kernel against various network attacks and information disclosure
+
+**Apply the new settings without rebooting:**
+
+```bash
+sudo sysctl --system
+```
+
+**Purpose**: Hardens the kernel against various network attacks and information disclosure.
 
 #### 4. Rootkit Detection (rkhunter)
 ```bash
-# Installed rkhunter
+# Install rkhunter
 sudo apt install -y rkhunter
 
-# Fixed configuration
+# Clear WEB_CMD so rkhunter's update step doesn't fail on Ubuntu's
+# locked-down /bin/false default. This is a well-known workaround.
 sudo sed -i 's|WEB_CMD="/bin/false"|WEB_CMD=""|' /etc/rkhunter.conf
 
-# Updated database
+# Build the baseline of "known good" file properties
 sudo rkhunter --propupd
 ```
-**Purpose**: Scans for rootkits, backdoors, and local exploits
+**Purpose**: Scans for rootkits, backdoors, and local exploits.
 
 #### 5. Log Monitoring (logwatch)
 ```bash
-# Installed logwatch
+# Install logwatch
 sudo apt install -y logwatch
 
-# Created configuration
+# Create configuration
 sudo mkdir -p /etc/logwatch/conf
 cat << 'EOF' | sudo tee /etc/logwatch/conf/logwatch.conf
 MailTo = root
@@ -196,7 +282,13 @@ Service = All
 Range = yesterday
 EOF
 ```
-**Purpose**: Daily system activity reports for security monitoring
+**Purpose**: Daily system activity reports for security monitoring.
+
+> Without a local mail server (postfix etc.), reports sent to `root` land in `/var/mail/root`. Read them with:
+> ```bash
+> sudo less /var/mail/root
+> ```
+> If you'd rather have reports emailed to you, install `postfix` (choose "Internet Site" during setup) and change `MailTo = your-email@example.com`.
 
 #### 6. Swap File Creation
 ```bash
@@ -234,15 +326,22 @@ ssh-copy-id deploy@your-server-ip
 ```
 
 ### GitHub SSH Key Setup
+
+Run these as the `deploy` user (not root) so the keys live under `/home/deploy/.ssh/`:
+
 ```bash
-# Generate SSH key for GitHub
+# Make sure ~/.ssh exists with correct permissions
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+
+# Generate SSH key for GitHub (no passphrase — fine for a server-only key)
 ssh-keygen -t ed25519 -C "github-vps-key" -f ~/.ssh/github_ed25519 -N ""
 
 # Display public key to add to GitHub
 cat ~/.ssh/github_ed25519.pub
 
-# Create SSH config for GitHub
-cat << 'EOF' > ~/.ssh/config
+# Append (NOT overwrite!) the GitHub entry to ~/.ssh/config.
+# If you already have an entry for github.com, edit the file by hand instead.
+cat << 'EOF' >> ~/.ssh/config
 Host github.com
     HostName github.com
     User git
@@ -256,7 +355,7 @@ chmod 600 ~/.ssh/config
 # Add GitHub to known hosts
 ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
 
-# Configure git identity
+# Configure git identity (replace with your own)
 git config --global user.name "your-username"
 git config --global user.email "your-email@example.com"
 ```
