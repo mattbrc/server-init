@@ -2,7 +2,7 @@
 
 Day-to-day reference for operating a Hermes Agent gateway on a VPS once installed.
 
-> **This is an operational reference, not a fresh-install guide.** For installing Hermes Agent from scratch (creating the `hermes` user, installing the package, wiring up Discord/Telegram, etc.), follow the [upstream Hermes Agent docs](https://github.com/anthropics/hermes-agent) and the systemd unit examples there. The sections below assume Hermes is already running on the box.
+> **This is an operational reference, not a fresh-install guide.** To install Hermes from scratch, follow [`hermes-setup.md`](./hermes-setup.md) in this directory.
 >
 > Matt-specific values (bot names, workspace paths, GitHub identities) appear throughout — they're examples of what you'll set up, not values you should copy verbatim.
 

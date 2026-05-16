@@ -12,10 +12,12 @@ This repository documents the complete setup process for securing and configurin
 
 ## Contents
 
-- `init.md` - Comprehensive VPS setup and hardening guide with step-by-step instructions
-- `HERMES.md` - Operational reference for running a Hermes Agent gateway on the box (assumes Hermes is already installed; points to upstream for fresh install)
+- `init.md` — VPS setup and hardening playbook (firewall, SSH, user creation, fail2ban, sysctl, etc.)
+- `hermes-setup.md` — Install playbook for a [Hermes Agent](https://github.com/NousResearch/hermes-agent) gateway with Discord + Telegram on the same box
+- `hermes-ops.md` — Day-to-day operational reference for the running Hermes gateway (logs, config, troubleshooting, rollback)
 
 ## Usage
 
 1. Start with `init.md` on a fresh Ubuntu VPS — it walks through base install, user creation, SSH hardening, firewall, and other defense-in-depth measures.
-2. If you also want to run a Hermes Agent on the box, follow the upstream Hermes Agent install instructions and use `HERMES.md` as your day-to-day ops cheat sheet.
+2. If you want to run a Hermes Agent on the box, follow `hermes-setup.md` after `init.md` is done.
+3. Once Hermes is running, keep `hermes-ops.md` handy as the day-to-day cheat sheet.
